@@ -14,7 +14,7 @@ def setup_pyinstaller():
     try:
         import PyInstaller
     except ImportError:
-        print("PyInstaller not found. Installing...")
+        print("--- PyInstaller not found. Installing... ---")
         run_command(f"{sys.executable} -m pip install pyinstaller")
 
 def get_best_py_file(directory):
@@ -40,14 +40,13 @@ def main():
     setup_pyinstaller()
 
     input_path = ""
-    exe_name = ""
+    exe_name_input = ""
 
     # --- 1. Handle Arguments (CLI Support) ---
-    # Usage: python main.py <source_file> <output_name>
     if len(sys.argv) > 1:
         input_path = sys.argv[1].strip().replace('"', '').replace("'", "")
         if len(sys.argv) > 2:
-            exe_name = sys.argv[2].strip().replace('"', '').replace("'", "")
+            exe_name_input = sys.argv[2].strip().replace('"', '').replace("'", "")
     
     # --- 2. Interactive Input if not provided ---
     if not input_path:
@@ -73,53 +72,59 @@ def main():
         source_dir = os.path.abspath(os.path.dirname(input_path) or os.getcwd())
         source_file = os.path.basename(input_path)
 
-    # --- 4. Handle Output Name ---
-    if not exe_name:
-        exe_name = input(f"Enter EXE name (default 'start'): ").strip() or "start"
+    # --- 4. Handle Output Name (New Logic) ---
+    # Default is the filename without .py
+    default_name = os.path.splitext(source_file)[0]
     
-    if exe_name.lower().endswith(".exe"):
-        exe_name = exe_name[:-4]
+    if not exe_name_input:
+        if len(sys.argv) == 1: # Only ask if not using CLI arguments
+            prompt_text = f"Enter EXE name (default '{default_name}'): "
+            exe_name_input = input(prompt_text).strip()
+        
+    final_exe_name = exe_name_input if exe_name_input else default_name
+    
+    # Clean .exe extension if the user typed it
+    if final_exe_name.lower().endswith(".exe"):
+        final_exe_name = final_exe_name[:-4]
 
     # --- 5. Execution ---
     original_cwd = os.getcwd()
     os.chdir(source_dir)
 
-    print(f"\nBuilding: {source_file} -> {exe_name}.exe")
-    # Using --clean to ensure fresh build
-    cmd = f'pyinstaller --onefile --clean --name "{exe_name}" "{source_file}"'
+    print(f"\nBuilding: {source_file} -> {final_exe_name}.exe")
+    cmd = f'pyinstaller --onefile --clean --name "{final_exe_name}" "{source_file}"'
     
     success = run_command(cmd)
 
-    # --- 6. Cleanup & Move (The "Pro" Touch) ---
-    dist_path = os.path.join(source_dir, "dist", f"{exe_name}.exe")
-    final_output_path = os.path.join(source_dir, f"{exe_name}.exe")
+    # --- 6. Cleanup & Move ---
+    dist_path = os.path.join(source_dir, "dist", f"{final_exe_name}.exe")
+    final_output_path = os.path.join(source_dir, f"{final_exe_name}.exe")
 
     if success and os.path.exists(dist_path):
-        # Move EXE to the input directory
         if os.path.exists(final_output_path):
-            os.remove(final_output_path) # Remove old version if exists
+            os.remove(final_output_path)
         shutil.move(dist_path, final_output_path)
         
         print("\n" + "="*40)
-        print(f"SUCCESS!")
-        print(f"Output: {final_output_path}")
+        print("SUCCESS!")
+        print(f"Output saved to: {final_output_path}")
         print("="*40)
     else:
         print("\nBuild failed.")
 
-    # Remove temporary PyInstaller mess
+    # Clean temporary files
     print("Cleaning up temporary files...")
     for folder in ["build", "dist"]:
         folder_path = os.path.join(source_dir, folder)
         if os.path.exists(folder_path):
             shutil.rmtree(folder_path)
     
-    spec_file = os.path.join(source_dir, f"{exe_name}.spec")
+    spec_file = os.path.join(source_dir, f"{final_exe_name}.spec")
     if os.path.exists(spec_file):
         os.remove(spec_file)
 
     os.chdir(original_cwd)
-    if len(sys.argv) == 1: # Only pause if run manually (not via CLI)
+    if len(sys.argv) <= 1:
         input("\nPress Enter to exit...")
 
 if __name__ == "__main__":
