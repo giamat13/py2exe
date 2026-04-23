@@ -4,13 +4,6 @@ import os
 import shutil
 import ctypes
 
-def is_admin():
-    """Checks if the script is running with administrative privileges."""
-    try:
-        return ctypes.windll.shell32.IsUserAnAdmin()
-    except:
-        return False
-
 def run_command(command):
     try:
         subprocess.check_call(command, shell=True)
@@ -18,48 +11,45 @@ def run_command(command):
     except subprocess.CalledProcessError:
         return False
 
-def setup_pyinstaller():
+def setup_dependencies():
     try:
         import PyInstaller
+        from PIL import Image
     except ImportError:
-        print("--- PyInstaller not found. Installing... ---")
-        run_command(f"{sys.executable} -m pip install pyinstaller")
+        print("--- Installing missing dependencies... ---")
+        run_command(f"{sys.executable} -m pip install pyinstaller pillow")
 
-def get_best_py_file(directory):
-    files = [f for f in os.listdir(directory) if f.endswith('.py')]
-    if not files: return None
-    for p in ["main.py", "__main__.py"]:
-        if p in files: return p
-    
-    print(f"\nMultiple files found in {directory}:")
-    for i, f in enumerate(files):
-        print(f"{i+1}) {f}")
-    
-    while True:
-        try:
-            choice = int(input("Select file number: ")) - 1
-            if 0 <= choice < len(files): return files[choice]
-        except ValueError: pass
-        print("Invalid choice.")
+def convert_to_ico(image_path, source_dir):
+    try:
+        from PIL import Image
+        img = Image.open(image_path)
+        ico_path = os.path.join(source_dir, "temp_icon.ico")
+        icon_sizes = [(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
+        img.save(ico_path, format='ICO', sizes=icon_sizes)
+        return ico_path
+    except Exception as e:
+        print(f"Warning: Could not convert image to icon: {e}")
+        return None
 
 def main():
-    if not is_admin():
-        print("!!! Warning: Script is not running as Admin. Some builds might fail !!!\n")
-
-    setup_pyinstaller()
+    setup_dependencies()
 
     input_path = ""
     exe_name_input = ""
+    icon_input = ""
 
-    # --- 1. Handle Arguments ---
+    # --- 1. Handle Arguments (CLI Support) ---
     if len(sys.argv) > 1:
-        input_path = sys.argv[1].strip().replace('"', '').replace("'", "")
+        input_path = os.path.abspath(sys.argv[1].strip().replace('"', '').replace("'", ""))
         if len(sys.argv) > 2:
             exe_name_input = sys.argv[2].strip().replace('"', '').replace("'", "")
+        if len(sys.argv) > 3:
+            icon_input = os.path.abspath(sys.argv[3].strip().replace('"', '').replace("'", ""))
     
-    # --- 2. Interactive Input ---
+    # --- 2. Interactive Input if not provided ---
     if not input_path:
         input_path = input("Enter path to .py file or folder: ").strip().replace('"', '').replace("'", "")
+        input_path = os.path.abspath(input_path)
 
     if not os.path.exists(input_path) and not input_path.endswith(".py"):
         if os.path.exists(input_path + ".py"):
@@ -71,76 +61,72 @@ def main():
 
     # --- 3. Directory Logic ---
     if os.path.isdir(input_path):
-        source_dir = os.path.abspath(input_path)
-        source_file = get_best_py_file(source_dir)
+        source_dir = input_path
+        files = [f for f in os.listdir(source_dir) if f.endswith('.py')]
+        source_file = "main.py" if "main.py" in files else (files[0] if files else None)
     else:
-        source_dir = os.path.abspath(os.path.dirname(input_path) or os.getcwd())
+        source_dir = os.path.dirname(input_path)
         source_file = os.path.basename(input_path)
 
-    if not source_file: return
+    if not source_file:
+        print("No Python file found.")
+        return
 
     # --- 4. EXE Name ---
     default_name = os.path.splitext(source_file)[0]
-    if not exe_name_input:
-        if len(sys.argv) == 1:
-            exe_name_input = input(f"Enter EXE name (default '{default_name}'): ").strip()
-    
-    final_exe_name = exe_name_input if exe_name_input else default_name
-    if final_exe_name.lower().endswith(".exe"):
-        final_exe_name = final_exe_name[:-4]
+    final_exe_name = (exe_name_input if exe_name_input else (input(f"Enter EXE name (default '{default_name}'): ").strip() or default_name))
+    final_exe_name = final_exe_name[:-4] if final_exe_name.lower().endswith(".exe") else final_exe_name
 
-    # --- 5. Advanced Options (Only if manual) ---
-    console_flag = ""
+    # --- 5. Icon Logic (Now handles both CLI and Interactive) ---
     icon_flag = ""
+    temp_ico = None
     
-    if len(sys.argv) == 1:
-        # Windowed mode?
-        hide_console = input("Hide console window (for GUI apps)? (y/n, default 'n'): ").lower() == 'y'
-        if hide_console:
-            console_flag = "--noconsole"
-        
-        # Icon?
-        icon_path = input("Drag an .ico file here for the icon (or press Enter for none): ").strip().replace('"', '').replace("'", "")
-        if icon_path and os.path.exists(icon_path):
-            icon_flag = f'--icon="{icon_path}"'
+    # If icon was not provided in CLI, ask for it
+    if not icon_input and len(sys.argv) <= 3:
+        icon_input = input("Drag an image (PNG, JPG, ICO) for the icon (Enter to skip): ").strip().replace('"', '').replace("'", "")
+        if icon_input:
+            icon_input = os.path.abspath(icon_input)
+
+    if icon_input and os.path.exists(icon_input):
+        if icon_input.lower().endswith(".ico"):
+            icon_flag = f'--icon="{icon_input}"'
+        else:
+            print("Converting image to icon...")
+            temp_ico = convert_to_ico(icon_input, source_dir)
+            if temp_ico:
+                icon_flag = f'--icon="{temp_ico}"'
 
     # --- 6. Build ---
     original_cwd = os.getcwd()
     os.chdir(source_dir)
 
     print(f"\nBuilding: {source_file} -> {final_exe_name}.exe...")
-    
-    # Final command assembly
-    cmd = f'pyinstaller --onefile --clean {console_flag} {icon_flag} --name "{final_exe_name}" "{source_file}"'
+    cmd = f'pyinstaller --onefile --clean {icon_flag} --name "{final_exe_name}" "{source_file}"'
     
     success = run_command(cmd)
 
     # --- 7. Move & Cleanup ---
-    dist_path = os.path.join(source_dir, "dist", f"{final_exe_name}.exe")
-    final_output_path = os.path.join(source_dir, f"{final_exe_name}.exe")
+    dist_exe = os.path.join(source_dir, "dist", f"{final_exe_name}.exe")
+    final_exe = os.path.join(source_dir, f"{final_exe_name}.exe")
 
-    if success and os.path.exists(dist_path):
-        if os.path.exists(final_output_path):
-            os.remove(final_output_path)
-        shutil.move(dist_path, final_output_path)
-        print("\n" + "="*40)
-        print("SUCCESS!")
-        print(f"File moved to: {final_output_path}")
-        print("="*40)
+    if success and os.path.exists(dist_exe):
+        if os.path.exists(final_exe): os.remove(final_exe)
+        shutil.move(dist_exe, final_exe)
+        print("\n" + "="*40 + f"\nSUCCESS! File: {final_exe}\n" + "="*40)
     else:
         print("\nBuild failed.")
 
-    print("Cleaning up temporary build files...")
+    # Cleanup
     for folder in ["build", "dist"]:
         path = os.path.join(source_dir, folder)
         if os.path.exists(path): shutil.rmtree(path)
     
     spec_file = os.path.join(source_dir, f"{final_exe_name}.spec")
     if os.path.exists(spec_file): os.remove(spec_file)
+    if temp_ico and os.path.exists(temp_ico): os.remove(temp_ico)
 
     os.chdir(original_cwd)
-    if len(sys.argv) <= 1:
-        input("\nPress Enter to exit...")
+    if len(sys.argv) <= 1: input("\nPress Enter to exit...")
 
 if __name__ == "__main__":
     main()
