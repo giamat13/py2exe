@@ -4,20 +4,36 @@ import os
 import shutil
 import ctypes
 
-def run_command(command):
+def run_command(command, show_output=True):
+    """Executes a command and optionally shows output in real-time."""
     try:
-        subprocess.check_call(command, shell=True)
+        if show_output:
+            # מציג את הפלט ישירות לטרמינל של המשתמש
+            subprocess.check_call(command, shell=True)
+        else:
+            subprocess.check_call(command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
         return True
-    except subprocess.CalledProcessError:
+    except subprocess.CalledProcessError as e:
+        print(f"\n[!] Error executing command: {command}")
         return False
 
 def setup_dependencies():
+    """Ensures dependencies are installed and shows progress."""
     try:
         import PyInstaller
         from PIL import Image
     except ImportError:
-        print("--- Installing missing dependencies... ---")
-        run_command(f"{sys.executable} -m pip install pyinstaller pillow")
+        print("\n--- Dependencies missing. Starting installation... ---")
+        print("Note: This might take a minute depending on your internet speed.\n")
+        
+        # הרצה עם פלט גלוי כדי לראות מה קורה
+        success = run_command(f"{sys.executable} -m pip install pyinstaller pillow", show_output=True)
+        
+        if not success:
+            print("\n[!] PIP installation failed. Please run this manually:")
+            print(f"{sys.executable} -m pip install pyinstaller pillow")
+            sys.exit(1)
+        print("\n--- Installation complete! ---\n")
 
 def convert_to_ico(image_path, source_dir):
     try:
@@ -38,7 +54,7 @@ def main():
     exe_name_input = ""
     icon_input = ""
 
-    # --- 1. Handle Arguments (CLI Support) ---
+    # --- 1. CLI Arguments ---
     if len(sys.argv) > 1:
         input_path = os.path.abspath(sys.argv[1].strip().replace('"', '').replace("'", ""))
         if len(sys.argv) > 2:
@@ -46,7 +62,7 @@ def main():
         if len(sys.argv) > 3:
             icon_input = os.path.abspath(sys.argv[3].strip().replace('"', '').replace("'", ""))
     
-    # --- 2. Interactive Input if not provided ---
+    # --- 2. Interactive ---
     if not input_path:
         input_path = input("Enter path to .py file or folder: ").strip().replace('"', '').replace("'", "")
         input_path = os.path.abspath(input_path)
@@ -59,7 +75,7 @@ def main():
         print(f"Error: Path '{input_path}' not found.")
         return
 
-    # --- 3. Directory Logic ---
+    # --- 3. Dir Logic ---
     if os.path.isdir(input_path):
         source_dir = input_path
         files = [f for f in os.listdir(source_dir) if f.endswith('.py')]
@@ -74,18 +90,15 @@ def main():
 
     # --- 4. EXE Name ---
     default_name = os.path.splitext(source_file)[0]
-    final_exe_name = (exe_name_input if exe_name_input else (input(f"Enter EXE name (default '{default_name}'): ").strip() or default_name))
+    final_exe_name = exe_name_input or (input(f"Enter EXE name (default '{default_name}'): ").strip() or default_name)
     final_exe_name = final_exe_name[:-4] if final_exe_name.lower().endswith(".exe") else final_exe_name
 
-    # --- 5. Icon Logic (Now handles both CLI and Interactive) ---
+    # --- 5. Icon Logic ---
     icon_flag = ""
     temp_ico = None
-    
-    # If icon was not provided in CLI, ask for it
     if not icon_input and len(sys.argv) <= 3:
-        icon_input = input("Drag an image (PNG, JPG, ICO) for the icon (Enter to skip): ").strip().replace('"', '').replace("'", "")
-        if icon_input:
-            icon_input = os.path.abspath(icon_input)
+        icon_input = input("Drag an image for icon (Enter to skip): ").strip().replace('"', '').replace("'", "")
+        if icon_input: icon_input = os.path.abspath(icon_input)
 
     if icon_input and os.path.exists(icon_input):
         if icon_input.lower().endswith(".ico"):
@@ -93,8 +106,7 @@ def main():
         else:
             print("Converting image to icon...")
             temp_ico = convert_to_ico(icon_input, source_dir)
-            if temp_ico:
-                icon_flag = f'--icon="{temp_ico}"'
+            if temp_ico: icon_flag = f'--icon="{temp_ico}"'
 
     # --- 6. Build ---
     original_cwd = os.getcwd()
@@ -103,26 +115,25 @@ def main():
     print(f"\nBuilding: {source_file} -> {final_exe_name}.exe...")
     cmd = f'pyinstaller --onefile --clean {icon_flag} --name "{final_exe_name}" "{source_file}"'
     
-    success = run_command(cmd)
+    success = run_command(cmd, show_output=True)
 
-    # --- 7. Move & Cleanup ---
+    # --- 7. Finalize ---
     dist_exe = os.path.join(source_dir, "dist", f"{final_exe_name}.exe")
     final_exe = os.path.join(source_dir, f"{final_exe_name}.exe")
 
     if success and os.path.exists(dist_exe):
         if os.path.exists(final_exe): os.remove(final_exe)
         shutil.move(dist_exe, final_exe)
-        print("\n" + "="*40 + f"\nSUCCESS! File: {final_exe}\n" + "="*40)
+        print("\n" + "="*40 + f"\nSUCCESS! Created: {final_exe}\n" + "="*40)
     else:
         print("\nBuild failed.")
 
     # Cleanup
     for folder in ["build", "dist"]:
-        path = os.path.join(source_dir, folder)
-        if os.path.exists(path): shutil.rmtree(path)
-    
-    spec_file = os.path.join(source_dir, f"{final_exe_name}.spec")
-    if os.path.exists(spec_file): os.remove(spec_file)
+        p = os.path.join(source_dir, folder)
+        if os.path.exists(p): shutil.rmtree(p)
+    spec = os.path.join(source_dir, f"{final_exe_name}.spec")
+    if os.path.exists(spec): os.remove(spec)
     if temp_ico and os.path.exists(temp_ico): os.remove(temp_ico)
 
     os.chdir(original_cwd)
