@@ -137,12 +137,14 @@ def main():
     if pyinstaller_exe:
         build_cmd = [pyinstaller_exe]
     else:
-        python_exe = shutil.which("python") or shutil.which("py") or sys.executable
-        build_cmd = [python_exe, "-m", "PyInstaller"]
+        # השתמש ב-pythonw.exe אם קיים (מונע console)
+        pythonw = shutil.which("pythonw") or shutil.which("python") or shutil.which("py") or sys.executable
+        build_cmd = [pythonw, "-m", "PyInstaller"]
 
     build_cmd += [
         "--onefile",
         "--noconsole",
+        "--windowed",
         "--clean",
         "--name", final_exe_name,
         source_file
