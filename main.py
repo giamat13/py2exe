@@ -142,6 +142,7 @@ def main():
 
     build_cmd += [
         "--onefile",
+        "--noconsole",
         "--clean",
         "--name", final_exe_name,
         source_file
